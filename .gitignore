@@ -2,3 +2,8 @@ CLAUDE.local.md
 AGENTS.local.md
 .env
 .claude/settings.local.json
+.venv/
+__pycache__/
+*.pyc
+index.faiss
+chunks.json

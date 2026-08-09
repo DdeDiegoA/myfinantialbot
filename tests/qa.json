@@ -1,0 +1,117 @@
+[
+  {
+    "question": "¿Cuál es el valor de la UVT para el año 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/uvt-2025-valor.md"
+  },
+  {
+    "question": "¿Cuál es el tope de patrimonio bruto que obliga a declarar renta por el año gravable 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/tope-patrimonio-bruto-2025.md"
+  },
+  {
+    "question": "¿Cuál es el tope de ingresos brutos para quedar obligado a declarar renta AG 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/tope-ingresos-brutos-2025.md"
+  },
+  {
+    "question": "¿Cuáles son las seis condiciones que obligan a una persona natural a declarar renta por el año gravable 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/quienes-deben-declarar-renta-2025.md"
+  },
+  {
+    "question": "Según el Artículo 261 del Estatuto Tributario, ¿qué está constituido por el patrimonio bruto?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/definicion-patrimonio-bruto.md"
+  },
+  {
+    "question": "¿Qué día inicia el calendario de declaración de renta 2025 para las cédulas terminadas en 01 y 02?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/calendario-declaracion-renta-2025-cedula.md"
+  },
+  {
+    "question": "¿Cuál es el tope de consumos con tarjeta de crédito que genera la obligación de declarar renta AG 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/tope-consumos-tarjeta-credito-2025.md"
+  },
+  {
+    "question": "¿Cuál es el tope de consignaciones bancarias e inversiones financieras para el año gravable 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/tope-consignaciones-bancarias-2025.md"
+  },
+  {
+    "question": "¿Una persona natural queda obligada a declarar renta solo por haber sido responsable de IVA, sin importar sus ingresos?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/responsables-iva-obligados-declarar.md"
+  },
+  {
+    "question": "¿Qué se considera ingresos brutos para efectos de la declaración de renta de una persona natural?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/definicion-ingresos-brutos.md"
+  },
+  {
+    "question": "¿Cuál es el tope de compras y consumos totales que obliga a declarar renta por el año gravable 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/tope-compras-consumos-totales-2025.md"
+  },
+  {
+    "question": "¿Qué es la UVT y quién fija su valor cada año en Colombia?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/uvt-que-es-y-para-que-sirve.md"
+  },
+  {
+    "question": "¿Qué condiciones debe cumplir simultáneamente una persona natural para NO estar obligada a declarar renta por el año gravable 2025?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/no-obligados-declarar-renta-2025.md"
+  },
+  {
+    "question": "¿Cuál es la tarifa de IVA vigente en Colombia para el año 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cuáles son los rangos y tarifas del impuesto de renta (tabla progresiva) para personas naturales del año gravable 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cuál es el plazo para presentar la declaración de IVA del año 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Qué deducciones puedo aplicar por dependientes económicos en mi declaración de renta?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cómo se calcula la renta presuntiva para el año gravable 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cuál es el tope para estar obligado a pagar el impuesto al patrimonio en 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cómo se registra el RUT ante la DIAN por primera vez?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cuáles son las sanciones por presentar la declaración de renta AG 2025 fuera de plazo?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Cuál es la tarifa de retención en la fuente aplicable a honorarios en 2025?",
+    "expected_type": "refusal",
+    "expected_source": null
+  },
+  {
+    "question": "¿Puede un extranjero que vivió menos de 183 días en Colombia durante 2025 declarar renta como residente fiscal?",
+    "expected_type": "refusal",
+    "expected_source": null
+  }
+]
