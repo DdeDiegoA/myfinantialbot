@@ -43,21 +43,17 @@ def get_completion(prompt: str, context: str) -> str:
         response.raise_for_status()
         return response.json()["content"][0]["text"]
 
-    response = requests.post(
-        f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "model": model,
-            "temperature": 0,  # deterministic output: eval.py needs reproducible scores
-            "messages": [
-                {"role": "system", "content": context},
-                {"role": "user", "content": prompt},
-            ],
-        },
-        timeout=60,
+    # OpenAI-compatible providers: use the OpenAI client for consistency
+    client = OpenAI(base_url=base_url, api_key=api_key)
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0,  # deterministic output: eval.py needs reproducible scores
+        messages=[
+            {"role": "system", "content": context},
+            {"role": "user", "content": prompt},
+        ],
     )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
+    return response.choices[0].message.content
 
 
 if __name__ == "__main__":
