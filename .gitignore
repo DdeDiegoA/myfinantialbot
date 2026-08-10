@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 index.faiss
 chunks.json
+.claude/scheduled_tasks.lock

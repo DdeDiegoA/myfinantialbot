@@ -1,5 +1,7 @@
 """OpenAI-compatible completion call across providers, config-driven only."""
 import os
+import time
+
 import requests
 from dotenv import load_dotenv
 
@@ -12,8 +14,25 @@ PROVIDERS = {
     "openai": "https://api.openai.com/v1",
 }
 
+# Nvidia's endpoint has a documented history of intermittent 5xx (design.md) --
+# observed live during eval: a 503 with zero retries killed a 23-case run at
+# case 9. Retrying transient server errors here fixes it for every caller
+# (rag.py, serve.py, eval.py) instead of each one reimplementing it.
+MAX_RETRIES = 3
+RETRY_BACKOFF_SECONDS = 2
+
 
 def get_completion(prompt: str, context: str) -> str:
+    for attempt in range(MAX_RETRIES):
+        try:
+            return _call(prompt, context)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code < 500 or attempt == MAX_RETRIES - 1:
+                raise  # 4xx is not transient (bad key/model/etc); last attempt re-raises
+            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+
+
+def _call(prompt: str, context: str) -> str:
     provider = os.environ["LLM_PROVIDER"]
     model = os.environ["LLM_MODEL"]
     api_key = os.environ["LLM_API_KEY"]
@@ -43,17 +62,21 @@ def get_completion(prompt: str, context: str) -> str:
         response.raise_for_status()
         return response.json()["content"][0]["text"]
 
-    # OpenAI-compatible providers: use the OpenAI client for consistency
-    client = OpenAI(base_url=base_url, api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        temperature=0,  # deterministic output: eval.py needs reproducible scores
-        messages=[
-            {"role": "system", "content": context},
-            {"role": "user", "content": prompt},
-        ],
+    response = requests.post(
+        f"{base_url}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "model": model,
+            "temperature": 0,  # deterministic output: eval.py needs reproducible scores
+            "messages": [
+                {"role": "system", "content": context},
+                {"role": "user", "content": prompt},
+            ],
+        },
+        timeout=60,
     )
-    return response.choices[0].message.content
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
 
 
 if __name__ == "__main__":

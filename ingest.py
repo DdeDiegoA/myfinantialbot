@@ -13,12 +13,23 @@ recursive) by paragraph, embeds chunks locally with sentence-transformers
 load them for retrieval.
 """
 import json
+import re
 from pathlib import Path
 
 DOCS_DIR = Path("docs/dian")
 INDEX_PATH = Path("index.faiss")
 CHUNKS_PATH = Path("chunks.json")
 MODEL_NAME = "all-MiniLM-L6-v2"
+
+SOURCE_COMMENT_RE = re.compile(r"<!--\s*source:\s*(\S+).*?-->", re.DOTALL)
+
+
+def extract_source_url(text: str) -> str:
+    """Pull the source URL from the '<!-- source: URL -->' first-line comment."""
+    m = SOURCE_COMMENT_RE.search(text)
+    if not m:
+        raise ValueError("missing '<!-- source: URL -->' comment")
+    return m.group(1)
 
 
 def chunk_text(text: str, max_chars: int = 1000) -> list[str]:
@@ -44,6 +55,34 @@ def chunk_text(text: str, max_chars: int = 1000) -> list[str]:
     return chunks
 
 
+def _with_heading_context(text: str) -> str:
+    """Prefix each paragraph with its nearest preceding '#' heading.
+
+    Naive paragraph-boundary chunking loses section context when a chunk
+    split falls right after a heading line -- the heading and the content
+    under it can land in different chunks, and the content-only chunk then
+    embeds poorly against questions phrased using the heading's own words.
+    Observed: a chunk that was just a bare enumerated list ranked dead last
+    (31/31) against "what are the six conditions", because the phrase "seis
+    condiciones" only existed in the "## Las seis condiciones" heading one
+    chunk earlier.
+    """
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    heading = ""
+    out = []
+    for p in paragraphs:
+        if p.startswith("#"):
+            heading = p
+            out.append(p)
+        elif heading and not p.startswith(heading):
+            # single \n, not \n\n: chunk_text() re-splits on "\n\n", so a \n\n
+            # join here would immediately undo this and re-separate them
+            out.append(f"{heading}\n{p}")
+        else:
+            out.append(p)
+    return "\n\n".join(out)
+
+
 def build_chunks() -> list[dict]:
     records = []
     # Flat, not recursive: docs/ also holds protto scaffold docs in
@@ -53,8 +92,15 @@ def build_chunks() -> list[dict]:
         if path.name == "SOURCES.md":  # metadata about the corpus, not corpus content
             continue
         text = path.read_text(encoding="utf-8")
-        for chunk in chunk_text(text):
-            records.append({"chunk_text": chunk, "source_file": str(path.relative_to(DOCS_DIR))})
+        source_url = extract_source_url(text)
+        body = SOURCE_COMMENT_RE.sub("", text, count=1).strip()  # already captured in source_url
+        body = _with_heading_context(body)
+        for chunk in chunk_text(body):
+            records.append({
+                "chunk_text": chunk,
+                "source_file": str(path.relative_to(DOCS_DIR)),
+                "source_url": source_url,
+            })
     return records
 
 

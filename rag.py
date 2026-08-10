@@ -8,6 +8,7 @@ CLI and the public endpoint share identical retrieval/refusal behavior.
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -18,13 +19,29 @@ load_dotenv()
 INDEX_PATH = Path("index.faiss")
 CHUNKS_PATH = Path("chunks.json")
 MODEL_NAME = "all-MiniLM-L6-v2"
-TOP_K = 3
-REFUSAL = "I don't have that information."
 
-# ponytail: cosine-similarity cutoff on normalized MiniLM embeddings, not a
-# trained/calibrated value. Tune via RAG_THRESHOLD env var once eval.py
-# (eval-harness) has real pass/fail numbers to calibrate against.
-RELEVANCE_THRESHOLD = float(os.environ.get("RAG_THRESHOLD", "0.35"))
+# 6, not 3: this corpus has overlapping content across docs (e.g. the
+# "six conditions" overview doc restates every threshold briefly, competing
+# in the ranking with each threshold's own dedicated doc that has the
+# actual number) -- observed empirically: the correct doc for a specific
+# threshold question can rank as low as #5. A wider top_k costs nothing at
+# this corpus size (31 chunks) and gives the LLM's own NO_INFO judgment
+# call the actual answer to work with instead of two near-miss chunks.
+TOP_K = 6
+REFUSAL = "I don't have that information."
+NO_INFO_SENTINEL = "NO_INFO"
+
+# Calibrated against tests/qa.json (23 real cases): this is a single-domain
+# corpus (Colombian DIAN tax law only), so every question -- in-corpus or
+# not -- scores topically similar (observed range 0.51-0.83 across BOTH
+# answer and refusal cases, fully overlapping). A similarity threshold alone
+# cannot separate "topically related" from "factually covered" here.
+# FLOOR is a cheap deterministic backstop for the clearly-unrelated tail
+# (blocks the observed refusal-case low of 0.513 without touching the
+# observed answer-case low of 0.650); everything above it is judged by the
+# LLM itself via the NO_INFO_SENTINEL instruction in _build_messages, which
+# is the layer that actually does the fact-coverage judgment.
+RELEVANCE_THRESHOLD = float(os.environ.get("RAG_THRESHOLD", "0.55"))
 
 _state = {}  # lazy-loaded {"model": ..., "index": ..., "chunks": [...]}
 
@@ -51,16 +68,49 @@ def _load():
     return model, index, chunks
 
 
+_WORD_RE = re.compile(r"[a-záéíóúñ0-9]+", re.IGNORECASE)
+RRF_K = 60  # standard Reciprocal Rank Fusion constant
+
+
+def _tokens(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower()))
+
+
 def retrieve(question: str, top_k: int = TOP_K) -> list[dict]:
-    """Embed the question and return top_k chunks as [{score, chunk_text, source_file}], best first."""
+    """Return top_k chunks as [{score, chunk_text, source_file, source_url}], best first.
+
+    Hybrid FAISS (semantic) + keyword-overlap (lexical) ranking, fused via
+    Reciprocal Rank Fusion. Pure semantic ranking alone was observed to bury
+    the exact-answer chunk as low as rank #12/33 for on-topic questions: this
+    corpus repeats generic framing ("declarar renta AG 2025") across nearly
+    every doc, which dilutes cosine similarity for the specific doc whose
+    *title* lexically matches the question but whose prose doesn't dominate
+    the embedding. Keyword overlap catches exactly that case; FAISS still
+    catches paraphrased questions with no shared vocabulary. Both signals are
+    computed over the WHOLE corpus (33 chunks -- trivial at this scale, no
+    top_k pre-filtering needed on either side before fusing).
+    """
     model, index, chunks = _load()
+    n = len(chunks)
     query_vec = model.encode([question], convert_to_numpy=True, normalize_embeddings=True)
-    scores, idxs = index.search(query_vec, top_k)
+    faiss_scores, faiss_idxs = index.search(query_vec, n)
+    faiss_rank = {int(i): rank for rank, i in enumerate(faiss_idxs[0]) if i != -1}
+    faiss_score_by_idx = {int(i): float(s) for s, i in zip(faiss_scores[0], faiss_idxs[0]) if i != -1}
+
+    q_tokens = _tokens(question)
+    kw_overlap = sorted(
+        range(n), key=lambda i: -len(q_tokens & _tokens(chunks[i]["chunk_text"]))
+    )
+    kw_rank = {i: rank for rank, i in enumerate(kw_overlap)}
+
+    fused_order = sorted(
+        range(n),
+        key=lambda i: -(1 / (RRF_K + faiss_rank.get(i, n)) + 1 / (RRF_K + kw_rank.get(i, n))),
+    )
+
     results = []
-    for score, i in zip(scores[0], idxs[0]):
-        if i == -1:  # fewer than top_k chunks in the index
-            continue
-        results.append({"score": float(score), **chunks[i]})
+    for i in fused_order[:top_k]:
+        results.append({"score": faiss_score_by_idx.get(i, 0.0), **chunks[i]})
     return results
 
 
@@ -71,12 +121,24 @@ def _passes_threshold(retrieved: list[dict], threshold: float = RELEVANCE_THRESH
 
 def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
     """Build (system_context, user_prompt) for llm.get_completion(prompt, context)."""
-    context_block = "\n\n".join(f"[{r['source_file']}]\n{r['chunk_text']}" for r in retrieved)
+    context_block = "\n\n".join(
+        f"[{r['source_url']}]\n{r['chunk_text']}" for r in retrieved
+    )
     system_context = (
         "You are a Colombian tax (DIAN) assistant. Answer using ONLY the context "
-        "below — do not use outside knowledge. Cite every claim inline with its "
-        "source file in brackets, e.g. [source.md]. If the context only partially "
-        "answers the question, say so explicitly instead of filling the gap.\n\n"
+        "below — do not use outside knowledge, and do not infer or extrapolate "
+        "facts the context does not literally state, even if a related topic is "
+        "covered. Watch specifically for different taxes/concepts that share a "
+        "word (e.g. \"patrimonio bruto\" — a renta-filing threshold — is NOT "
+        "\"impuesto al patrimonio\", a separate wealth tax): a shared word does "
+        "not mean the context answers the question.\n\n"
+        f"If the context does not contain the SPECIFIC fact needed to answer, "
+        f"respond with exactly this token and nothing else: {NO_INFO_SENTINEL}\n\n"
+        "Otherwise: answer in 2-3 sentences maximum, no preamble, no boilerplate. "
+        "Cite the original source at the end of each claim as (Fuente: <url>), "
+        "using the exact URL shown in brackets before each context passage below "
+        "— never invent a citation and never cite anything other than these "
+        "URLs.\n\n"
         f"Context:\n{context_block}"
     )
     return system_context, question
@@ -93,7 +155,17 @@ def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVA
 
     system_context, user_prompt = _build_messages(question, retrieved)
     answer = get_completion(user_prompt, system_context)
-    sources = [{"doc": r["source_file"], "snippet": r["chunk_text"][:200]} for r in retrieved]
+
+    # Second gate layer: the embedding floor only catches clearly-unrelated
+    # queries (see RELEVANCE_THRESHOLD comment). For topically-similar but
+    # factually-uncovered questions, the LLM itself judges coverage and
+    # signals it via this sentinel instead of freeform refusal prose --
+    # normalized here to the same canonical REFUSAL the floor path returns,
+    # so callers (eval.py, serve.py) see one deterministic refusal shape.
+    if answer.strip() == NO_INFO_SENTINEL:
+        return {"answer": REFUSAL, "sources": []}
+
+    sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in retrieved]
     return {"answer": answer, "sources": sources}
 
 
@@ -107,4 +179,4 @@ if __name__ == "__main__":
     if result["sources"]:
         print("\nSources:")
         for s in result["sources"]:
-            print(f"- [{s['doc']}] {s['snippet']}")
+            print(f"- {s['source_url']} — {s['snippet']}")

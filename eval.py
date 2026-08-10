@@ -31,8 +31,8 @@ def _grounding_score(answer: str, retrieved: list[dict]) -> float:
 
 
 def _cited_docs(answer: str) -> set[str]:
-    """Extract [source.md]-style inline citations from the answer text."""
-    return set(re.findall(r"\[([^\[\]]+\.\w+)\]", answer))
+    """Extract (Fuente: <url>)-style inline citations from the answer text."""
+    return set(re.findall(r"\(Fuente:\s*(\S+)\)", answer))
 
 
 def score_case(case: dict) -> tuple[float, str]:
@@ -50,7 +50,7 @@ def score_case(case: dict) -> tuple[float, str]:
     grounding = _grounding_score(answer, retrieved)
     grounding_ok = grounding >= GROUNDING_OVERLAP_THRESHOLD
 
-    retrieved_docs = {r["source_file"] for r in retrieved}
+    retrieved_docs = {r["source_url"] for r in retrieved}
     cited = _cited_docs(answer)
     citation_ok = bool(cited) and cited.issubset(retrieved_docs)
 
@@ -62,13 +62,17 @@ def score_case(case: dict) -> tuple[float, str]:
 def main() -> float:
     cases = json.loads(QA_PATH.read_text(encoding="utf-8"))
     total = 0.0
+    errors = 0
     for case in cases:
-        score, note = score_case(case)
+        try:
+            score, note = score_case(case)
+        except Exception as e:  # noqa: BLE001 -- a single API hiccup must not kill a 23-case run
+            score, note, errors = 0.0, f"ERROR (not scored as a real fail): {e}", errors + 1
         total += score
         print(f"[{score:.2f}] {case['question'][:60]!r} — {note}")
 
     overall = 100 * total / len(cases)
-    print(f"\nOverall score: {overall:.1f} / 100 ({len(cases)} cases)")
+    print(f"\nOverall score: {overall:.1f} / 100 ({len(cases)} cases, {errors} errored)")
     return overall
 
 
