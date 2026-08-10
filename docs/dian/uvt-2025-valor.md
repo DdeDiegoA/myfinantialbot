@@ -35,6 +35,6 @@ de $49.799 fijado para 2025. Por ejemplo, el tope de patrimonio bruto de
 equivale a $69.718.600.
 
 Para el año gravable 2026, la DIAN expidió posteriormente la Resolución
-000227 del 15 de diciembre de 2025, fijando la UVT 2026 en $52.374, pero ese
+000238 del 15 de diciembre de 2025, fijando la UVT 2026 en $52.374, pero ese
 valor no aplica a las obligaciones del año gravable 2025 descritas en este
-corpus.
+corpus. Ver `uvt-2026-valor.md` para el detalle de la UVT 2026.

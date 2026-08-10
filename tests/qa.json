@@ -65,6 +65,16 @@
     "expected_source": "docs/dian/no-obligados-declarar-renta-2025.md"
   },
   {
+    "question": "¿Cuál es el valor de la UVT para el año 2026?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/uvt-2026-valor.md"
+  },
+  {
+    "question": "¿Cuál es el nuevo umbral del impuesto al patrimonio para 2026 según el Decreto Legislativo 1474?",
+    "expected_type": "answer",
+    "expected_source": "docs/dian/impuesto-patrimonio-2026-decreto-1474.md"
+  },
+  {
     "question": "¿Cuál es la tarifa de IVA vigente en Colombia para el año 2025?",
     "expected_type": "refusal",
     "expected_source": null
@@ -91,8 +101,8 @@
   },
   {
     "question": "¿Cuál es el tope para estar obligado a pagar el impuesto al patrimonio en 2025?",
-    "expected_type": "refusal",
-    "expected_source": null
+    "expected_type": "answer",
+    "expected_source": "docs/dian/impuesto-patrimonio-2026-decreto-1474.md"
   },
   {
     "question": "¿Cómo se registra el RUT ante la DIAN por primera vez?",
