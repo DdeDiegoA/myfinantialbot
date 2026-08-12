@@ -4,11 +4,19 @@ retrieval/anti-hallucination logic, just HTTP plumbing (public-endpoint spec).
 Run: uvicorn serve:app --host 0.0.0.0 --port 8000
 """
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from rag import answer_question
 
 app = FastAPI(title="MyFinancialBot RAG API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 class AskRequest(BaseModel):

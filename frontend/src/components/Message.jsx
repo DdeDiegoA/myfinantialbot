@@ -36,7 +36,7 @@ const sourceVariants = {
   exit: { opacity: 0, height: 0, transition: { duration: 0.2 } },
 }
 
-function Message({ message, isExpanded, onSourceClick }) {
+const Message = React.forwardRef(function Message({ message, isExpanded, onSourceClick }, ref) {
   const isUser = message.type === 'user'
   const isSystem = message.type === 'system'
   const isError = message.type === 'error'
@@ -44,6 +44,7 @@ function Message({ message, isExpanded, onSourceClick }) {
   if (isSystem) {
     return (
       <motion.div
+        ref={ref}
         className="flex justify-center"
         variants={messageVariants}
         custom={isUser}
@@ -61,6 +62,7 @@ function Message({ message, isExpanded, onSourceClick }) {
   if (isError) {
     return (
       <motion.div
+        ref={ref}
         className="flex gap-3"
         variants={messageVariants}
         custom={isUser}
@@ -80,6 +82,7 @@ function Message({ message, isExpanded, onSourceClick }) {
 
   return (
     <motion.div
+      ref={ref}
       className={`flex gap-3 mb-4 ${isUser ? 'flex-row-reverse' : ''}`}
       variants={messageVariants}
       custom={isUser}
@@ -172,6 +175,6 @@ function Message({ message, isExpanded, onSourceClick }) {
       </div>
     </motion.div>
   )
-}
+})
 
 export default Message
