@@ -2,6 +2,7 @@
 import os
 import time
 
+import openai
 import requests
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -30,6 +31,17 @@ def get_completion(prompt: str, context: str) -> str:
         except requests.exceptions.HTTPError as e:
             if e.response.status_code < 500 or attempt == MAX_RETRIES - 1:
                 raise  # 4xx is not transient (bad key/model/etc); last attempt re-raises
+            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+        except openai.APIError as e:
+            # nvidia's client (OpenAI SDK, not requests) raises this for its
+            # own transient errors -- e.g. "ResourceExhausted: Worker local
+            # total request limit reached" -- which the HTTPError branch
+            # above can never catch since it's a different exception type.
+            # No status code to check here (server sends bare error events
+            # mid-stream-setup), so treat all of it as transient like the
+            # nvidia 5xx case this retry loop already exists for.
+            if attempt == MAX_RETRIES - 1:
+                raise
             time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
 
 
@@ -109,8 +121,12 @@ def stream_completion(prompt: str, context: str):
     natively here (same client/params as get_completion's nvidia branch);
     other providers yield their one complete response as a single chunk --
     this project's deployed LLM_PROVIDER is nvidia, so that's the real path.
-    No retry wrapper here (unlike get_completion): a 5xx after we've already
-    yielded partial text to the client can't be retried transparently.
+    Retries (like get_completion) only cover the connect-and-first-chunk
+    window: nvidia's own transient errors (e.g. "ResourceExhausted: Worker
+    local total request limit reached") surface on the first iteration of
+    the stream, before any content has reached the caller, so retrying
+    there is safe. Once real content has been yielded, a later failure
+    can't be retried transparently and is left to propagate as before.
     """
     provider = os.environ["LLM_PROVIDER"]
     if provider != "nvidia":
@@ -120,21 +136,31 @@ def stream_completion(prompt: str, context: str):
     model = os.environ["LLM_MODEL"]
     api_key = os.environ["LLM_API_KEY"]
     client = OpenAI(base_url=PROVIDERS["nvidia"], api_key=api_key, timeout=60)
-    stream = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        top_p=1,
-        max_tokens=16384,
-        extra_body={"reasoning_budget": 16384},
-        messages=[
-            {"role": "system", "content": context},
-            {"role": "user", "content": prompt},
-        ],
-        stream=True,
-    )
-    for c in stream:
-        if c.choices and c.choices[0].delta.content is not None:
-            yield c.choices[0].delta.content
+
+    yielded_any = False
+    for attempt in range(MAX_RETRIES):
+        try:
+            stream = client.chat.completions.create(
+                model=model,
+                temperature=0,
+                top_p=1,
+                max_tokens=16384,
+                extra_body={"reasoning_budget": 16384},
+                messages=[
+                    {"role": "system", "content": context},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+            )
+            for c in stream:
+                if c.choices and c.choices[0].delta.content is not None:
+                    yielded_any = True
+                    yield c.choices[0].delta.content
+            return
+        except openai.APIError:
+            if yielded_any or attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
 
 
 if __name__ == "__main__":

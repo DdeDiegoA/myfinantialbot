@@ -225,8 +225,8 @@ _GREETING_RE = re.compile(
 )
 _CAPABILITY_RE = re.compile(
     r"\b(qu[eé]\s+puedes?\s+hacer|qu[eé]\s+(cosas?|preguntas?)\s+(puedo|se\s+puede)|"
-    r"c[oó]mo\s+funcionas?|qui[eé]n\s+eres|ay[uú]da|help|what\s+can\s+you\s+do|"
-    r"what\s+do\s+you\s+do|who\s+are\s+you|how\s+do\s+you\s+work)\b",
+    r"c[oó]mo\s+funcionas\b|qui[eé]n\s+eres|ay[uú]da|help|what\s+can\s+you\s+do|"
+    r"what\s+do\s+you\s+do|who\s+are\s+you|how\s+do\s+you\s+work)\W*$",
     re.IGNORECASE,
 )
 
