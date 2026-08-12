@@ -7,11 +7,18 @@ Built for Reto 3 EPAM ("IA con Criterio") — the evaluation criterion is *not h
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt && python ingest.py
-python rag.py "¿Quiénes deben declarar renta en 2025?"
+make install   # creates .venv, installs all deps into it (one interpreter, no split-env)
+make up         # ingest.py + `uvicorn serve:app` on :8000, one command
 ```
 
-Before either command: copy `.env.example` to `.env` and set `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`. `ingest.py` doesn't need it (embedding is local); `rag.py` does, for the generation call.
+Before `make up`: copy `.env.example` to `.env` and set `LLM_PROVIDER` / `LLM_MODEL` / `LLM_API_KEY`. `ingest.py` doesn't need it (embedding is local); the LLM call does.
+
+CLI instead of the HTTP endpoint:
+
+```bash
+.venv/bin/python ingest.py   # or: make ingest
+.venv/bin/python rag.py "¿Quiénes deben declarar renta en 2025?"
+```
 
 ## Architecture
 

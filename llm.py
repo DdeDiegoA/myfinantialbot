@@ -4,6 +4,7 @@ import time
 
 import requests
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -61,6 +62,30 @@ def _call(prompt: str, context: str) -> str:
         )
         response.raise_for_status()
         return response.json()["content"][0]["text"]
+
+    if provider == "nvidia":
+        # ponytail: nvidia's non-streaming chat/completions hangs past the
+        # read timeout for reasoning models; their own docs recommend
+        # stream=True. Client-side, not a transient error, so no retry helps.
+        client = OpenAI(base_url=base_url, api_key=api_key, timeout=60)
+        stream = client.chat.completions.create(
+            model=model,
+            temperature=0,  # deterministic output: eval.py needs reproducible scores
+            top_p=1,
+            max_tokens=16384,
+            extra_body={"reasoning_budget": 16384},
+            messages=[
+                {"role": "system", "content": context},
+                {"role": "user", "content": prompt},
+            ],
+            stream=True,
+        )
+        chunks = [
+            c.choices[0].delta.content
+            for c in stream
+            if c.choices and c.choices[0].delta.content is not None
+        ]
+        return "".join(chunks)
 
     response = requests.post(
         f"{base_url}/chat/completions",

@@ -134,14 +134,31 @@ def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
         "not mean the context answers the question.\n\n"
         f"If the context does not contain the SPECIFIC fact needed to answer, "
         f"respond with exactly this token and nothing else: {NO_INFO_SENTINEL}\n\n"
-        "Otherwise: answer in 2-3 sentences maximum, no preamble, no boilerplate. "
-        "Cite the original source at the end of each claim as (Fuente: <url>), "
-        "using the exact URL shown in brackets before each context passage below "
-        "— never invent a citation and never cite anything other than these "
-        "URLs.\n\n"
+        "Otherwise: answer in 2-3 sentences maximum, no preamble, no boilerplate, "
+        "no inline citations or source markers — the sources are listed "
+        "separately after your answer.\n\n"
         f"Context:\n{context_block}"
     )
     return system_context, question
+
+
+def _apa_citation(source_file: str, source_url: str) -> str:
+    """Best-effort APA-style web reference: no per-doc author/date metadata
+    exists in the corpus, so author defaults to DIAN (issuer of nearly every
+    doc here) and date to "s.f." (sin fecha) per APA's own rule for undated
+    web sources, rather than inventing a date.
+    """
+    title = Path(source_file).stem.replace("-", " ").replace("_", " ").strip().capitalize()
+    return f"DIAN. (s.f.). {title}. {source_url}"
+
+
+def _format_sources_block(retrieved: list[dict]) -> str:
+    """Aggregate distinct docs used, APA-style, dedup by source_file (one doc = one citation)."""
+    seen = {}
+    for r in retrieved:
+        seen.setdefault(r["source_file"], r["source_url"])
+    citations = [_apa_citation(f, u) for f, u in seen.items()]
+    return "Fuentes:\n" + "\n".join(f"- {c}" for c in citations)
 
 
 def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVANCE_THRESHOLD) -> dict:
@@ -166,7 +183,8 @@ def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVA
         return {"answer": REFUSAL, "sources": []}
 
     sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in retrieved]
-    return {"answer": answer, "sources": sources}
+    full_answer = f"{answer.strip()}\n\n{_format_sources_block(retrieved)}"
+    return {"answer": full_answer, "sources": sources}
 
 
 if __name__ == "__main__":
@@ -176,7 +194,3 @@ if __name__ == "__main__":
 
     result = answer_question(sys.argv[1])
     print(result["answer"])
-    if result["sources"]:
-        print("\nSources:")
-        for s in result["sources"]:
-            print(f"- {s['source_url']} — {s['snippet']}")
