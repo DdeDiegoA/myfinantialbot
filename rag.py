@@ -300,7 +300,15 @@ def answer_question(question: str, top_k: int = TOP_K) -> dict:
     # signals it via this sentinel instead of freeform refusal prose --
     # normalized here to the same canonical REFUSAL the floor path returns,
     # so callers (eval.py, serve.py) see one deterministic refusal shape.
-    if answer.strip() == NO_INFO_SENTINEL:
+    # Exact match would miss it: reasoning models occasionally leak a raw
+    # chain-of-thought preamble around the sentinel instead of emitting it
+    # alone (observed live via eval.py -- same question, same temperature=0,
+    # clean sentinel on one run and leaked reasoning text containing the
+    # sentinel on another). Containment still uniquely identifies refusal --
+    # "NO_INFO" has no legitimate reason to appear in a real Spanish tax
+    # answer -- so this catches the leak without needing to parse/strip
+    # provider-specific reasoning formatting.
+    if NO_INFO_SENTINEL in answer:
         return {"answer": REFUSAL, "sources": []}
 
     # `retrieved` is the WHOLE corpus (TOP_K=999) so the LLM can combine
