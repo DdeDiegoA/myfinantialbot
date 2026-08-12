@@ -1,15 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 
 function InputBox({ onSendMessage, disabled }) {
   const [input, setInput] = useState('')
   const [isFocused, setIsFocused] = useState(false)
-  const [rows, setRows] = useState(1)
   const textareaRef = useRef(null)
 
   const handleChange = (e) => {
     setInput(e.target.value)
-    
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
       const height = Math.min(textareaRef.current.scrollHeight, 200)
@@ -28,20 +26,12 @@ function InputBox({ onSendMessage, disabled }) {
     if (input.trim() && !disabled) {
       onSendMessage(input.trim())
       setInput('')
-      setRows(1)
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
     }
   }
 
   return (
-    <motion.div
-      className="flex gap-3 items-end"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: 'spring', stiffness: 100, damping: 15, delay: 0.2 }}
-    >
+    <div className="flex gap-2 items-end">
       <motion.textarea
         ref={textareaRef}
         value={input}
@@ -49,40 +39,25 @@ function InputBox({ onSendMessage, disabled }) {
         onKeyDown={handleKeyDown}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        placeholder="Ask about Colombian tax law, DIAN regulations, or financial compliance..."
+        placeholder="Pregunta sobre impuestos, RUT, facturación..."
         disabled={disabled}
-        className="flex-1 resize-none rounded-lg border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed transition-all"
-        style={{ maxHeight: '200px', minHeight: '44px' }}
-        animate={{
-          borderColor: isFocused ? 'rgb(59, 130, 246)' : 'rgb(203, 213, 225)',
-          boxShadow: isFocused
-            ? '0 0 0 3px rgba(59, 130, 246, 0.1)'
-            : '0 0 0 0px rgba(59, 130, 246, 0)',
-        }}
-        transition={{ type: 'spring', stiffness: 200 }}
+        className="flex-1 resize-none rounded-xl bg-surface border px-3.5 py-2.5 text-sm text-ink focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ maxHeight: '200px', minHeight: '42px' }}
+        animate={{ borderColor: isFocused ? 'oklch(0.65 0.16 255)' : 'oklch(0.30 0.016 258)' }}
+        transition={{ duration: 0.15 }}
       />
-      <motion.button
+      <button
         onClick={handleSubmit}
         disabled={disabled || !input.trim()}
-        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-6 py-3 transition-all disabled:bg-slate-400 disabled:cursor-not-allowed flex items-center gap-2 h-11 flex-shrink-0 shadow-md hover:shadow-lg"
-        whileHover={!disabled && input.trim() ? { scale: 1.05 } : {}}
-        whileTap={!disabled && input.trim() ? { scale: 0.95 } : {}}
-        animate={{
-          backgroundColor:
-            disabled || !input.trim() ? 'rgb(148, 163, 184)' : 'rgb(37, 99, 235)',
+        className="rounded-xl px-4 h-[42px] text-sm flex-shrink-0 disabled:cursor-not-allowed"
+        style={{
+          backgroundColor: disabled || !input.trim() ? 'oklch(0.245 0.015 258)' : 'oklch(0.48 0.16 255)',
+          color: disabled || !input.trim() ? 'oklch(0.60 0.012 258)' : 'oklch(0.99 0 0)',
         }}
-        transition={{ type: 'spring', stiffness: 200 }}
       >
-        <span>Send</span>
-        <motion.span
-          className="text-lg"
-          animate={{ x: [0, 3, 0] }}
-          transition={{ duration: 2, repeat: Infinity }}
-        >
-          →
-        </motion.span>
-      </motion.button>
-    </motion.div>
+        Enviar
+      </button>
+    </div>
   )
 }
 

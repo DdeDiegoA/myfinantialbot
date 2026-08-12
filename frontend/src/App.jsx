@@ -69,10 +69,10 @@ function App() {
 
   return (
     <motion.div
-      className="flex flex-col h-screen bg-gradient-to-br from-slate-50 to-slate-100"
+      className="flex flex-col h-screen bg-bg"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.3 }}
     >
       <ChatInterface 
         messages={messages}
