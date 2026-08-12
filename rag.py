@@ -43,6 +43,16 @@ NO_INFO_SENTINEL = "NO_INFO"
 # is the layer that actually does the fact-coverage judgment.
 RELEVANCE_THRESHOLD = float(os.environ.get("RAG_THRESHOLD", "0.55"))
 
+# Secondary, lower floor for colloquial phrasing ("cuanto vale un uvt" vs the
+# calibration set's formal "¿Cuál es el valor de la UVT para 2025?"): observed
+# scoring ~0.30-0.35 points lower than the formal phrasing of the SAME
+# in-corpus question, below RELEVANCE_THRESHOLD entirely. Only trusted when
+# the chunk is ALSO the single best semantic match across the whole corpus
+# (faiss_rank 0) -- i.e. nothing else scores better, so a soft floor is safe:
+# a truly unrelated query won't rank any corpus chunk this way. The LLM's own
+# NO_INFO judgment remains the real fact-coverage gate either way.
+SOFT_FLOOR = float(os.environ.get("RAG_SOFT_FLOOR", "0.40"))
+
 _state = {}  # lazy-loaded {"model": ..., "index": ..., "chunks": [...]}
 
 
@@ -71,9 +81,28 @@ def _load():
 _WORD_RE = re.compile(r"[a-záéíóúñ0-9]+", re.IGNORECASE)
 RRF_K = 60  # standard Reciprocal Rank Fusion constant
 
+# Spanish function/interrogative words: present in nearly every chunk and in
+# nearly every question, so left unfiltered they pad every doc's keyword-
+# overlap count roughly equally and drown out the one or two content words
+# that actually distinguish a match (e.g. "un" tied "impuesto al patrimonio"
+# with "valor de la UVT" on overlap count for the query "cuanto vale un uvt",
+# letting a coincidental tie beat FAISS's correctly-ranked #1 semantic match
+# in RRF fusion).
+_STOPWORDS = {
+    "a", "al", "algo", "como", "con", "cual", "cuál", "cuales", "cuáles",
+    "cuanto", "cuánto", "cuanta", "cuánta", "de", "del", "el", "en", "es",
+    "esta", "está", "este", "esto", "la", "las", "lo", "los", "para", "por",
+    "que", "qué", "se", "son", "su", "sus", "un", "una", "unos", "unas",
+    "y", "o",
+}
+
 
 def _tokens(text: str) -> set[str]:
     return set(_WORD_RE.findall(text.lower()))
+
+
+def _content_tokens(text: str) -> set[str]:
+    return _tokens(text) - _STOPWORDS
 
 
 def retrieve(question: str, top_k: int = TOP_K) -> list[dict]:
@@ -97,9 +126,18 @@ def retrieve(question: str, top_k: int = TOP_K) -> list[dict]:
     faiss_rank = {int(i): rank for rank, i in enumerate(faiss_idxs[0]) if i != -1}
     faiss_score_by_idx = {int(i): float(s) for s, i in zip(faiss_scores[0], faiss_idxs[0]) if i != -1}
 
-    q_tokens = _tokens(question)
+    q_content = _content_tokens(question)
     kw_overlap = sorted(
-        range(n), key=lambda i: -len(q_tokens & _tokens(chunks[i]["chunk_text"]))
+        range(n),
+        # Ties (common: many chunks share exactly one content word) broke by
+        # raw array position before this fix -- i.e. by chunks.json's
+        # processing order, not relevance. Breaking ties by FAISS rank
+        # instead lets the semantic signal decide among equally-keyword-
+        # matched chunks, which is the whole point of fusing the two.
+        key=lambda i: (
+            -len(q_content & _content_tokens(chunks[i]["chunk_text"])),
+            faiss_rank.get(i, n),
+        ),
     )
     kw_rank = {i: rank for rank, i in enumerate(kw_overlap)}
 
@@ -110,13 +148,26 @@ def retrieve(question: str, top_k: int = TOP_K) -> list[dict]:
 
     results = []
     for i in fused_order[:top_k]:
-        results.append({"score": faiss_score_by_idx.get(i, 0.0), **chunks[i]})
+        results.append({
+            "score": faiss_score_by_idx.get(i, 0.0),
+            "is_best_semantic_match": faiss_rank.get(i) == 0,
+            **chunks[i],
+        })
     return results
 
 
 def _passes_threshold(retrieved: list[dict], threshold: float = RELEVANCE_THRESHOLD) -> bool:
-    """The anti-hallucination gate: True only if the best match clears the bar."""
-    return bool(retrieved) and retrieved[0]["score"] >= threshold
+    """The anti-hallucination gate: the best match must either clear the
+    formal-phrasing-calibrated bar outright, or be the single best semantic
+    match anywhere in the corpus while still clearing a lower soft floor
+    (catches colloquial phrasings scoring below calibration -- see SOFT_FLOOR).
+    """
+    if not retrieved:
+        return False
+    top = retrieved[0]
+    if top["score"] >= threshold:
+        return True
+    return top.get("is_best_semantic_match", False) and top["score"] >= SOFT_FLOOR
 
 
 def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
