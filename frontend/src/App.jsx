@@ -35,11 +35,26 @@ function App() {
     const botId = `${Date.now()}-bot`
     let botMessageStarted = false
 
+    // Inactivity deadline, not a total one: a real answer can take ~20s to
+    // its first token and then stream for a while, so a flat timeout would
+    // abort valid slow answers. This only fires when the server has sent
+    // nothing at all for STALL_MS -- the case where the UI would otherwise
+    // sit on a spinner forever (reader.read() blocks with no timeout of its
+    // own, and setLoading(false) never runs while it's blocked).
+    const STALL_MS = 45000
+    const controller = new AbortController()
+    let stallTimer = setTimeout(() => controller.abort(), STALL_MS)
+    const resetStallTimer = () => {
+      clearTimeout(stallTimer)
+      stallTimer = setTimeout(() => controller.abort(), STALL_MS)
+    }
+
     try {
       const response = await fetch('https://myfinancialbot.decodgo.com/ask/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
+        signal: controller.signal,
       })
 
       if (!response.ok || !response.body) {
@@ -68,9 +83,12 @@ function App() {
         }
       }
 
+      let sawDone = false
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        resetStallTimer()
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
@@ -82,22 +100,51 @@ function App() {
 
           if (event.type === 'delta') {
             appendToBot(event.text)
+          } else if (event.type === 'replace') {
+            // Server retracted everything streamed so far (leaked model
+            // reasoning that resolved to a refusal, or a mid-stream crash).
+            // Overwrite rather than append so the discarded text never shows.
+            if (!botMessageStarted) {
+              appendToBot(event.text)
+            } else {
+              setMessages(prev => prev.map(m => (
+                m.id === botId ? { ...m, content: event.text, sources: [] } : m
+              )))
+            }
           } else if (event.type === 'done') {
+            sawDone = true
             setMessages(prev => prev.map(m => (
               m.id === botId ? { ...m, sources: event.sources || [] } : m
             )))
           }
         }
       }
+
+      // Stream ended without a `done` event: the connection dropped mid-answer
+      // rather than finishing. Text already shown stays, but say it's partial
+      // instead of presenting a truncated answer as complete.
+      if (!sawDone && botMessageStarted) {
+        setMessages(prev => prev.map(m => (
+          m.id === botId
+            ? { ...m, content: `${m.content}\n\n_(respuesta incompleta — la conexión se interrumpió)_` }
+            : m
+        )))
+      }
     } catch (error) {
-      const errorMessage = {
+      // An abort surfaces as a DOMException whose raw message ("signal is
+      // aborted without reason") means nothing to a user -- name the actual
+      // situation instead.
+      const content = error.name === 'AbortError'
+        ? 'El servidor no respondió a tiempo. Intenta de nuevo.'
+        : `Error: ${error.message}. Intenta de nuevo.`
+      setMessages(prev => [...prev, {
         id: Date.now().toString(),
         type: 'error',
-        content: `Error: ${error.message}. Please try again.`,
+        content,
         timestamp: new Date(),
-      }
-      setMessages(prev => [...prev, errorMessage])
+      }])
     } finally {
+      clearTimeout(stallTimer)
       setLoading(false)
     }
   }

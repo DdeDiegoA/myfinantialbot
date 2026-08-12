@@ -14,6 +14,13 @@ El decreto **bajó el umbral de sujeción al impuesto al patrimonio de
 equivale aproximadamente a **$2.094.960.000 pesos colombianos** (40.000 ×
 $52.374).
 
+## Umbral vigente para el año gravable 2025
+
+El umbral de **40.000 UVT aplica a partir del año gravable 2026**. Para el
+**año gravable 2025** seguía vigente el umbral anterior de **72.000 UVT**,
+que con la UVT 2025 en $49.799 equivale aproximadamente a
+**$3.585.528.000 pesos colombianos** (72.000 × $49.799).
+
 ## Tarifas progresivas
 
 El decreto introdujo tarifas progresivas de hasta el **5%** sobre el

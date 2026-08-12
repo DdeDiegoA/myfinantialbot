@@ -308,6 +308,11 @@ def answer_question(question: str, top_k: int = TOP_K) -> dict:
     # "NO_INFO" has no legitimate reason to appear in a real Spanish tax
     # answer -- so this catches the leak without needing to parse/strip
     # provider-specific reasoning formatting.
+    # An all-content-None stream returns "" here; without this guard the
+    # caller got a sources block with no answer above it and no error.
+    if not answer.strip():
+        return {"answer": REFUSAL, "sources": []}
+
     if NO_INFO_SENTINEL in answer:
         return {"answer": REFUSAL, "sources": []}
 
@@ -354,24 +359,38 @@ def stream_answer_question(question: str, top_k: int = TOP_K):
     # sensitive prefix check: a real answer starting differently in case or
     # content diverges within the first character or two.
     buf = ""
+    full = ""
     decided_real = False
     for delta in stream_completion(user_prompt, system_context):
+        full += delta
+        # Checked against the WHOLE response so far, not just the pre-commit
+        # buffer. A prefix check can't work: the observed leak is a long
+        # reasoning preamble ("We need to answer using only context...") that
+        # is already streaming by the time the sentinel shows up. Once it
+        # appears, everything emitted so far was model reasoning, not an
+        # answer -- so `refusal` means REPLACE what was shown (see serve.py),
+        # which is the only way to keep both streaming and the no-leak
+        # guarantee.
+        if NO_INFO_SENTINEL in full:
+            yield {"type": "refusal"}
+            return
         if decided_real:
             yield {"type": "delta", "text": delta}
             continue
         buf += delta
-        stripped = buf.strip()
-        if stripped and not NO_INFO_SENTINEL.startswith(stripped):
+        if len(buf) > len(NO_INFO_SENTINEL):
             decided_real = True
             yield {"type": "delta", "text": buf}
             buf = ""
 
     if not decided_real:
-        if buf.strip() == NO_INFO_SENTINEL:
+        # Empty buf also lands here: a stream whose chunks all carried
+        # delta.content=None yields nothing at all, which previously fell
+        # through to emit a sources block with no answer above it.
+        if not buf.strip():
             yield {"type": "refusal"}
             return
-        if buf:
-            yield {"type": "delta", "text": buf}
+        yield {"type": "delta", "text": buf}
 
     cited = [r for r in retrieved if r["score"] >= SOFT_FLOOR] or retrieved[:1]
     sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in cited]

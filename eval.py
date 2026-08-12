@@ -30,11 +30,6 @@ def _grounding_score(answer: str, retrieved: list[dict]) -> float:
     return len(answer_tokens & context_tokens) / len(answer_tokens)
 
 
-def _cited_docs(answer: str) -> set[str]:
-    """Extract (Fuente: <url>)-style inline citations from the answer text."""
-    return set(re.findall(r"\(Fuente:\s*(\S+)\)", answer))
-
-
 def score_case(case: dict) -> tuple[float, str]:
     """Return (score in [0,1], note) for one QA case."""
     question = case["question"]
@@ -47,12 +42,24 @@ def score_case(case: dict) -> tuple[float, str]:
         return (1.0 if ok else 0.0), ("exact refusal" if ok else f"expected refusal, got: {answer[:80]!r}")
 
     # expected_type == "answer"
-    grounding = _grounding_score(answer, retrieved)
-    grounding_ok = grounding >= GROUNDING_OVERLAP_THRESHOLD
-
+    # Read citations off the structured `sources` answer_question already
+    # returns, rather than regex-scraping the prose. The previous version
+    # looked for inline "(Fuente: <url>)" markers, but the system prompt
+    # explicitly forbids inline citations (sources are appended as a separate
+    # APA block) -- so citation_ok was unreachable and every answer case was
+    # capped at 0.5, putting a hard 68/100 ceiling on a flawless bot.
+    cited = {s["source_url"] for s in result["sources"]}
     retrieved_docs = {r["source_url"] for r in retrieved}
-    cited = _cited_docs(answer)
     citation_ok = bool(cited) and cited.issubset(retrieved_docs)
+
+    # Ground against only the chunks actually cited, not all 77. retrieve()
+    # returns the whole corpus (TOP_K=999), whose pooled vocabulary is broad
+    # enough that almost any in-domain Spanish sentence clears the threshold
+    # -- including one carrying a fabricated number, which is precisely the
+    # failure this metric exists to catch.
+    cited_chunks = [r for r in retrieved if r["source_url"] in cited] or retrieved[:1]
+    grounding = _grounding_score(answer, cited_chunks)
+    grounding_ok = grounding >= GROUNDING_OVERLAP_THRESHOLD
 
     score = 0.5 * grounding_ok + 0.5 * citation_ok
     note = f"grounding={grounding:.2f}({'ok' if grounding_ok else 'fail'}) citation={'ok' if citation_ok else 'fail'} cited={cited or '{}'}"

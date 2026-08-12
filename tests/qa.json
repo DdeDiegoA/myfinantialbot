@@ -91,8 +91,8 @@
   },
   {
     "question": "¿Qué deducciones puedo aplicar por dependientes económicos en mi declaración de renta?",
-    "expected_type": "refusal",
-    "expected_source": null
+    "expected_type": "answer",
+    "expected_source": "docs/dian/deducciones-dependientes-salud-soportes.md"
   },
   {
     "question": "¿Cómo se calcula la renta presuntiva para el año gravable 2025?",
