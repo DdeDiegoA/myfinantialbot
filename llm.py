@@ -104,6 +104,39 @@ def _call(prompt: str, context: str) -> str:
     return response.json()["choices"][0]["message"]["content"]
 
 
+def stream_completion(prompt: str, context: str):
+    """Yield response text incrementally as it arrives. Only nvidia streams
+    natively here (same client/params as get_completion's nvidia branch);
+    other providers yield their one complete response as a single chunk --
+    this project's deployed LLM_PROVIDER is nvidia, so that's the real path.
+    No retry wrapper here (unlike get_completion): a 5xx after we've already
+    yielded partial text to the client can't be retried transparently.
+    """
+    provider = os.environ["LLM_PROVIDER"]
+    if provider != "nvidia":
+        yield get_completion(prompt, context)
+        return
+
+    model = os.environ["LLM_MODEL"]
+    api_key = os.environ["LLM_API_KEY"]
+    client = OpenAI(base_url=PROVIDERS["nvidia"], api_key=api_key, timeout=60)
+    stream = client.chat.completions.create(
+        model=model,
+        temperature=0,
+        top_p=1,
+        max_tokens=16384,
+        extra_body={"reasoning_budget": 16384},
+        messages=[
+            {"role": "system", "content": context},
+            {"role": "user", "content": prompt},
+        ],
+        stream=True,
+    )
+    for c in stream:
+        if c.choices and c.choices[0].delta.content is not None:
+            yield c.choices[0].delta.content
+
+
 if __name__ == "__main__":
     # ponytail: smoke test only, needs real env/network to pass; asserts the contract shape
     assert set(PROVIDERS) == {"openrouter", "nvidia", "anthropic", "openai"}

@@ -314,6 +314,63 @@ def answer_question(question: str, top_k: int = TOP_K) -> dict:
     return {"answer": full_answer, "sources": sources}
 
 
+def stream_answer_question(question: str, top_k: int = TOP_K):
+    """Streaming twin of answer_question: yields dict events instead of one
+    blob, so serve.py can forward text as it's generated. Same retrieval and
+    anti-hallucination logic (small-talk shortcut, threshold gate, NO_INFO
+    sentinel) -- only the LLM call and response delivery are incremental.
+
+    Events: {"type": "delta", "text": str} (append to the message being
+    built), {"type": "refusal"} (render REFUSAL, no further deltas follow),
+    {"type": "done", "sources": [...]} (stream finished; sources array for
+    the UI's expandable source list).
+    """
+    if _is_small_talk(question):
+        yield {"type": "delta", "text": _small_talk_answer(question)}
+        yield {"type": "done", "sources": []}
+        return
+
+    retrieved = retrieve(question, top_k=top_k)
+
+    if not _passes_threshold(retrieved):
+        yield {"type": "refusal"}
+        return
+
+    from llm import stream_completion  # deferred: only needed on the above-threshold path
+
+    system_context, user_prompt = _build_messages(question, retrieved)
+
+    # Can't know if this is a real answer or the NO_INFO sentinel until
+    # enough of the stream has arrived to rule one out -- buffer just long
+    # enough to disambiguate (sentinel is 7 chars), then flush. Case-
+    # sensitive prefix check: a real answer starting differently in case or
+    # content diverges within the first character or two.
+    buf = ""
+    decided_real = False
+    for delta in stream_completion(user_prompt, system_context):
+        if decided_real:
+            yield {"type": "delta", "text": delta}
+            continue
+        buf += delta
+        stripped = buf.strip()
+        if stripped and not NO_INFO_SENTINEL.startswith(stripped):
+            decided_real = True
+            yield {"type": "delta", "text": buf}
+            buf = ""
+
+    if not decided_real:
+        if buf.strip() == NO_INFO_SENTINEL:
+            yield {"type": "refusal"}
+            return
+        if buf:
+            yield {"type": "delta", "text": buf}
+
+    cited = [r for r in retrieved if r["score"] >= SOFT_FLOOR] or retrieved[:1]
+    sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in cited]
+    yield {"type": "delta", "text": f"\n\n{_format_sources_block(cited)}"}
+    yield {"type": "done", "sources": sources}
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print('Usage: python rag.py "<question>"')

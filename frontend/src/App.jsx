@@ -32,28 +32,63 @@ function App() {
     setMessages(prev => [...prev, userMessage])
     setLoading(true)
 
+    const botId = `${Date.now()}-bot`
+    let botMessageStarted = false
+
     try {
-      const response = await fetch('https://myfinancialbot.decodgo.com/ask', {
+      const response = await fetch('https://myfinancialbot.decodgo.com/ask/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ question })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
       })
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error(`API error: ${response.status}`)
       }
 
-      const data = await response.json()
-      const botMessage = {
-        id: Date.now().toString(),
-        type: 'bot',
-        content: data.answer,
-        sources: data.sources || [],
-        timestamp: new Date(),
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      const appendToBot = (text) => {
+        if (!botMessageStarted) {
+          botMessageStarted = true
+          setLoading(false)
+          setMessages(prev => [...prev, {
+            id: botId,
+            type: 'bot',
+            content: text,
+            sources: [],
+            timestamp: new Date(),
+          }])
+        } else {
+          setMessages(prev => prev.map(m => (
+            m.id === botId ? { ...m, content: m.content + text } : m
+          )))
+        }
       }
-      setMessages(prev => [...prev, botMessage])
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() // keep the possibly-incomplete last line for next chunk
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          const event = JSON.parse(line)
+
+          if (event.type === 'delta') {
+            appendToBot(event.text)
+          } else if (event.type === 'done') {
+            setMessages(prev => prev.map(m => (
+              m.id === botId ? { ...m, sources: event.sources || [] } : m
+            )))
+          }
+        }
+      }
     } catch (error) {
       const errorMessage = {
         id: Date.now().toString(),
