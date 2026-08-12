@@ -20,14 +20,18 @@ INDEX_PATH = Path("index.faiss")
 CHUNKS_PATH = Path("chunks.json")
 MODEL_NAME = "all-MiniLM-L6-v2"
 
-# 6, not 3: this corpus has overlapping content across docs (e.g. the
-# "six conditions" overview doc restates every threshold briefly, competing
-# in the ranking with each threshold's own dedicated doc that has the
-# actual number) -- observed empirically: the correct doc for a specific
-# threshold question can rank as low as #5. A wider top_k costs nothing at
-# this corpus size (31 chunks) and gives the LLM's own NO_INFO judgment
-# call the actual answer to work with instead of two near-miss chunks.
-TOP_K = 6
+# Effectively "the whole corpus": at this scale (41 chunks, ~7.4K tokens
+# total) there's no real cost to giving the LLM everything instead of
+# gambling on ranking. Needed for compound questions ("si gano 3 salarios
+# mínimos, ¿debo declarar renta?") that require combining facts from TWO
+# unrelated-looking docs (SMMLV value + the UVT income threshold) -- observed
+# empirically: the threshold doc can rank as low as #16 by any single
+# ranking signal, well past any top_k small enough to matter for cost. The
+# threshold gate below is unaffected (it scores the single best chunk over
+# the WHOLE corpus regardless of top_k), so off-topic queries still refuse;
+# this only widens what in-domain queries get to reason over. Revisit if the
+# corpus grows enough that full-context cost/latency becomes real.
+TOP_K = 999
 REFUSAL = "I don't have that information."
 NO_INFO_SENTINEL = "NO_INFO"
 
@@ -183,14 +187,76 @@ def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
         "word (e.g. \"patrimonio bruto\" — a renta-filing threshold — is NOT "
         "\"impuesto al patrimonio\", a separate wealth tax): a shared word does "
         "not mean the context answers the question.\n\n"
-        f"If the context does not contain the SPECIFIC fact needed to answer, "
+        "Always answer in the same language the question was asked in (Spanish "
+        "or English) — never translate or mix languages.\n\n"
+        "The question may be COMPOUND: it may state a personal figure (income, "
+        "salary in 'salarios mínimos', assets, etc.) and ask whether that figure "
+        "crosses a threshold from the context. In that case, using ONLY numeric "
+        "facts literally stated in the context: first write out each raw number "
+        "you're using and where it comes from (one short line per number — e.g. "
+        "'SMMLV 2025 = $1.423.500', 'umbral = 1.400 UVT', 'UVT 2025 = $49.799'), "
+        "then write out the calculation as an explicit expression with the "
+        "actual numbers substituted in (e.g. '3 × $1.423.500 × 12 = $51.246.000' "
+        "then '$51.246.000 / $49.799 = 1029 UVT'), THEN state the comparison and "
+        "final personalized yes/no answer. Never skip straight to a conclusion "
+        "without showing this arithmetic — silently-wrong mental math is worse "
+        "than showing the work. If the question mixes monthly and annual "
+        "figures (e.g. a monthly salary vs an annual income threshold), "
+        "annualize before comparing and say so explicitly. If any number the "
+        "arithmetic needs is missing from the context, do not invent or "
+        "estimate it — say which figure you'd need instead.\n\n"
+        f"If the context does not contain the SPECIFIC fact(s) needed to answer, "
         f"respond with exactly this token and nothing else: {NO_INFO_SENTINEL}\n\n"
-        "Otherwise: answer in 2-3 sentences maximum, no preamble, no boilerplate, "
+        "Otherwise: answer in 2-4 sentences maximum, no preamble, no boilerplate, "
         "no inline citations or source markers — the sources are listed "
-        "separately after your answer.\n\n"
+        "separately after your answer. Exception: for a COMPOUND question, the "
+        "required arithmetic lines above don't count against this limit — keep "
+        "the final conclusion itself to 1-2 sentences after showing the work.\n\n"
         f"Context:\n{context_block}"
     )
     return system_context, question
+
+
+_GREETING_RE = re.compile(
+    r"^\s*(hola|buen[oa]s?\s*(d[ií]as?|tardes?|noches?)?|hey|hi|hello|"
+    r"qu[eé]\s*tal|saludos)\W*$",
+    re.IGNORECASE,
+)
+_CAPABILITY_RE = re.compile(
+    r"\b(qu[eé]\s+puedes?\s+hacer|qu[eé]\s+(cosas?|preguntas?)\s+(puedo|se\s+puede)|"
+    r"c[oó]mo\s+funcionas?|qui[eé]n\s+eres|ay[uú]da|help|what\s+can\s+you\s+do|"
+    r"what\s+do\s+you\s+do|who\s+are\s+you|how\s+do\s+you\s+work)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_small_talk(question: str) -> bool:
+    """Greetings and meta/capability questions ('hola', 'qué puedes hacer',
+    'what can you do') don't need retrieval -- there's no DIAN fact to look
+    up, and running them through the threshold gate just produces a refusal
+    for something that isn't actually a factual question. Cheap regex check,
+    no extra LLM call, so it doesn't add latency to real questions.
+    """
+    return bool(_GREETING_RE.match(question) or _CAPABILITY_RE.search(question))
+
+
+def _small_talk_answer(question: str) -> str:
+    from llm import get_completion  # deferred: same reason as the RAG path
+
+    system_context = (
+        "You are MyFinancialBot, an assistant that answers questions about "
+        "Colombian tax law (DIAN): UVT value, who must file income tax "
+        "returns (declarar renta), wealth tax (impuesto al patrimonio), "
+        "gross income/assets thresholds, and related SMMLV (minimum wage) "
+        "figures used in those calculations. Respond in the same language "
+        "the message was written in (Spanish or English). If greeted, greet "
+        "back briefly and mention in one sentence what you can help with. If "
+        "asked what you can do, briefly list the topics above. Do not answer "
+        "any actual tax question here — you have no factual context loaded; "
+        "if the message contains a real question, say you'll look it up "
+        "instead of answering it. Keep the whole reply to 1-3 sentences."
+    )
+    return get_completion(question, system_context)
 
 
 def _apa_citation(source_file: str, source_url: str) -> str:
@@ -214,6 +280,9 @@ def _format_sources_block(retrieved: list[dict]) -> str:
 
 def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVANCE_THRESHOLD) -> dict:
     """Core entry point shared by rag.py CLI and serve.py. Always returns {answer, sources}."""
+    if _is_small_talk(question):
+        return {"answer": _small_talk_answer(question), "sources": []}
+
     retrieved = retrieve(question, top_k=top_k)
 
     if not _passes_threshold(retrieved, threshold):
@@ -233,8 +302,14 @@ def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVA
     if answer.strip() == NO_INFO_SENTINEL:
         return {"answer": REFUSAL, "sources": []}
 
-    sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in retrieved]
-    full_answer = f"{answer.strip()}\n\n{_format_sources_block(retrieved)}"
+    # `retrieved` is the WHOLE corpus (TOP_K=999) so the LLM can combine
+    # facts from anywhere for compound questions -- but citing all 16 docs
+    # regardless of relevance would be noise. Sources are display-only, so
+    # trim to what's actually plausibly relevant (SOFT_FLOOR, the same bar
+    # the gate itself trusts as a real relevance signal).
+    cited = [r for r in retrieved if r["score"] >= SOFT_FLOOR] or retrieved[:1]
+    sources = [{"source_url": r["source_url"], "snippet": r["chunk_text"][:200]} for r in cited]
+    full_answer = f"{answer.strip()}\n\n{_format_sources_block(cited)}"
     return {"answer": full_answer, "sources": sources}
 
 
