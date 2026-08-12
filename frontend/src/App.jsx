@@ -49,12 +49,8 @@ function App() {
       stallTimer = setTimeout(() => controller.abort(), STALL_MS)
     }
 
-    const apiUrl = import.meta.env.PROD
-      ? 'https://myfinancialbot.decodgo.com/ask/stream'
-      : 'http://localhost:8000/ask/stream'
-
     try {
-      const response = await fetch(apiUrl, {
+      const response = await fetch('https://myfinancialbot.decodgo.com/ask/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
