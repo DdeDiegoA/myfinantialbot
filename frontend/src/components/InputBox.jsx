@@ -31,7 +31,7 @@ function InputBox({ onSendMessage, disabled }) {
   }
 
   return (
-    <div className="flex gap-2 items-end">
+    <div className="flex gap-2 items-end min-w-0">
       <motion.textarea
         ref={textareaRef}
         value={input}

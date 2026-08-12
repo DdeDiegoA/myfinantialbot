@@ -8,16 +8,16 @@ function ChatInterface({ messages, loading, onSendMessage, messagesEndRef }) {
   return (
     <div className="flex flex-col h-full">
       <header className="border-b border-border-muted">
-        <div className="max-w-2xl mx-auto px-6 py-4 flex items-center gap-2.5">
-          <span className="w-6 h-6 rounded-md bg-accent flex items-center justify-center text-accent-ink text-xs font-semibold">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-2.5 min-w-0">
+          <span className="w-6 h-6 rounded-md bg-accent flex items-center justify-center text-accent-ink text-xs font-semibold flex-shrink-0">
             M
           </span>
-          <h1 className="text-sm font-medium text-ink">MyFinancialBot</h1>
-          <span className="text-xs text-ink-faint">DIAN · Impuestos Colombia</span>
+          <h1 className="text-sm font-medium text-ink truncate">MyFinancialBot</h1>
+          <span className="hidden sm:inline text-xs text-ink-faint truncate">DIAN · Impuestos Colombia</span>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <div className="max-w-2xl mx-auto">
           <MessageList
             messages={messages}
@@ -30,7 +30,7 @@ function ChatInterface({ messages, loading, onSendMessage, messagesEndRef }) {
       </div>
 
       <div className="border-t border-border-muted">
-        <div className="max-w-2xl mx-auto px-6 py-4">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4">
           <InputBox onSendMessage={onSendMessage} disabled={loading} />
           <p className="text-xs text-ink-faint text-center mt-2.5">
             MyFinancialBot puede cometer errores. Verifica la información oficial en la DIAN.

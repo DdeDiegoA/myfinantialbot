@@ -44,7 +44,7 @@ const Message = React.forwardRef(function Message({ message, isExpanded, onSourc
     return (
       <motion.div ref={ref} className="flex justify-end" variants={messageVariants} initial="initial" animate="animate" exit="exit">
         <div className="bg-accent text-accent-ink rounded-2xl rounded-br-sm px-4 py-2.5 max-w-[85%]">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.content}</p>
         </div>
       </motion.div>
     )
@@ -52,7 +52,7 @@ const Message = React.forwardRef(function Message({ message, isExpanded, onSourc
 
   return (
     <motion.div ref={ref} variants={messageVariants} initial="initial" animate="animate" exit="exit">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{message.content}</p>
+      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">{message.content}</p>
 
       {message.sources && message.sources.length > 0 && (
         <div className="mt-3">
