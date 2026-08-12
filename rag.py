@@ -38,24 +38,17 @@ NO_INFO_SENTINEL = "NO_INFO"
 # Calibrated against tests/qa.json (23 real cases): this is a single-domain
 # corpus (Colombian DIAN tax law only), so every question -- in-corpus or
 # not -- scores topically similar (observed range 0.51-0.83 across BOTH
-# answer and refusal cases, fully overlapping). A similarity threshold alone
-# cannot separate "topically related" from "factually covered" here.
-# FLOOR is a cheap deterministic backstop for the clearly-unrelated tail
-# (blocks the observed refusal-case low of 0.513 without touching the
-# observed answer-case low of 0.650); everything above it is judged by the
-# LLM itself via the NO_INFO_SENTINEL instruction in _build_messages, which
-# is the layer that actually does the fact-coverage judgment.
-RELEVANCE_THRESHOLD = float(os.environ.get("RAG_THRESHOLD", "0.55"))
-
-# Secondary, lower floor for colloquial phrasing ("cuanto vale un uvt" vs the
-# calibration set's formal "¿Cuál es el valor de la UVT para 2025?"): observed
-# scoring ~0.30-0.35 points lower than the formal phrasing of the SAME
-# in-corpus question, below RELEVANCE_THRESHOLD entirely. Only trusted when
-# the chunk is ALSO the single best semantic match across the whole corpus
-# (faiss_rank 0) -- i.e. nothing else scores better, so a soft floor is safe:
-# a truly unrelated query won't rank any corpus chunk this way. The LLM's own
-# NO_INFO judgment remains the real fact-coverage gate either way.
-SOFT_FLOOR = float(os.environ.get("RAG_SOFT_FLOOR", "0.40"))
+# answer and refusal cases, fully overlapping, and the overlap only widened
+# as the corpus grew past ~4 topic categories: on-topic colloquial scores
+# like 0.541 for a CIIU question started sitting right next to off-topic
+# scores of 0.481/0.444). A similarity threshold alone cannot separate
+# "topically related" from "factually covered" here -- verified directly
+# (bypassing this gate entirely) that the LLM's own NO_INFO judgment reliably
+# refuses off-topic questions even when handed the full corpus as context. So
+# SOFT_FLOOR only needs to cheaply catch truly-nonsensical input before
+# spending an LLM call on it; real fact-coverage judgment is the LLM's job
+# via the NO_INFO_SENTINEL instruction in _build_messages either way.
+SOFT_FLOOR = float(os.environ.get("RAG_SOFT_FLOOR", "0.35"))
 
 _state = {}  # lazy-loaded {"model": ..., "index": ..., "chunks": [...]}
 
@@ -152,26 +145,17 @@ def retrieve(question: str, top_k: int = TOP_K) -> list[dict]:
 
     results = []
     for i in fused_order[:top_k]:
-        results.append({
-            "score": faiss_score_by_idx.get(i, 0.0),
-            "is_best_semantic_match": faiss_rank.get(i) == 0,
-            **chunks[i],
-        })
+        results.append({"score": faiss_score_by_idx.get(i, 0.0), **chunks[i]})
     return results
 
 
-def _passes_threshold(retrieved: list[dict], threshold: float = RELEVANCE_THRESHOLD) -> bool:
-    """The anti-hallucination gate: the best match must either clear the
-    formal-phrasing-calibrated bar outright, or be the single best semantic
-    match anywhere in the corpus while still clearing a lower soft floor
-    (catches colloquial phrasings scoring below calibration -- see SOFT_FLOOR).
+def _passes_threshold(retrieved: list[dict]) -> bool:
+    """Cheap pre-filter, not the real gate: only blocks near-nonsensical
+    input (SOFT_FLOOR) from reaching the LLM at all. Real fact-coverage
+    judgment happens downstream via the LLM's own NO_INFO sentinel -- see
+    SOFT_FLOOR comment for why this was simplified from a two-tier check.
     """
-    if not retrieved:
-        return False
-    top = retrieved[0]
-    if top["score"] >= threshold:
-        return True
-    return top.get("is_best_semantic_match", False) and top["score"] >= SOFT_FLOOR
+    return bool(retrieved) and retrieved[0]["score"] >= SOFT_FLOOR
 
 
 def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
@@ -205,8 +189,25 @@ def _build_messages(question: str, retrieved: list[dict]) -> tuple[str, str]:
         "annualize before comparing and say so explicitly. If any number the "
         "arithmetic needs is missing from the context, do not invent or "
         "estimate it — say which figure you'd need instead.\n\n"
-        f"If the context does not contain the SPECIFIC fact(s) needed to answer, "
-        f"respond with exactly this token and nothing else: {NO_INFO_SENTINEL}\n\n"
+        "IMPORTANT — check this BEFORE applying the NO_INFO rule below: the "
+        "question may be ACCOUNT-SPECIFIC, asking about THIS taxpayer's own "
+        "current state with DIAN — including blunt yes/no phrasing like "
+        "'¿tengo X disponible?' or 'do I have X?' — such as their pending "
+        "balance/saldo, whether they have a declaración sugerida available, "
+        "their RUT status, refund eligibility, etc., rather than a general "
+        "rule. Even phrased as yes/no, you cannot answer it as yes/no. You "
+        "have no "
+        "access to any taxpayer's account or portal session, so you can NEVER "
+        "state or imply the actual figure/status. But this does NOT mean "
+        "NO_INFO: if the context describes the PROCESS/portal path to check "
+        "it (which section, which virtual service, what's required), that "
+        "process description IS the fact this question needs — explain it, "
+        "and say plainly that only the taxpayer's own portal login shows the "
+        "real figure. Only fall through to NO_INFO if the context has no "
+        "process description for it either.\n\n"
+        f"For every other case: if the context does not contain the SPECIFIC "
+        f"fact needed to answer, respond with exactly this token and nothing "
+        f"else: {NO_INFO_SENTINEL}\n\n"
         "Otherwise: answer in 2-4 sentences maximum, no preamble, no boilerplate, "
         "no inline citations or source markers — the sources are listed "
         "separately after your answer. Exception: for a COMPOUND question, the "
@@ -278,14 +279,14 @@ def _format_sources_block(retrieved: list[dict]) -> str:
     return "Fuentes:\n" + "\n".join(f"- {c}" for c in citations)
 
 
-def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVANCE_THRESHOLD) -> dict:
+def answer_question(question: str, top_k: int = TOP_K) -> dict:
     """Core entry point shared by rag.py CLI and serve.py. Always returns {answer, sources}."""
     if _is_small_talk(question):
         return {"answer": _small_talk_answer(question), "sources": []}
 
     retrieved = retrieve(question, top_k=top_k)
 
-    if not _passes_threshold(retrieved, threshold):
+    if not _passes_threshold(retrieved):
         return {"answer": REFUSAL, "sources": []}
 
     from llm import get_completion  # deferred: only needed on the above-threshold path
@@ -294,7 +295,7 @@ def answer_question(question: str, top_k: int = TOP_K, threshold: float = RELEVA
     answer = get_completion(user_prompt, system_context)
 
     # Second gate layer: the embedding floor only catches clearly-unrelated
-    # queries (see RELEVANCE_THRESHOLD comment). For topically-similar but
+    # queries (see SOFT_FLOOR comment). For topically-similar but
     # factually-uncovered questions, the LLM itself judges coverage and
     # signals it via this sentinel instead of freeform refusal prose --
     # normalized here to the same canonical REFUSAL the floor path returns,
